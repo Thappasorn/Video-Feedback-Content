@@ -586,7 +586,7 @@ let S={ name:'', src:{kind:'none',url:'',id:'',label:''}, fps:25, duration:0, co
 let FRAMES={};
 let CFG={ author:'', appsUrl:'', sheetId:'' };
 let HIST=[], HI=-1, filter='all', sel=null, selStock=null, pendingFrame=null, YT=null;
-let capStream=null, capVid=null, capSurface='';   // จับภาพจากแท็บ (Screen Capture API)
+let capStream=null, capVid=null, capSurface='', capDeclined=false;   // จับภาพจากแท็บ (Screen Capture API)
 function normalize(){ if(!Array.isArray(S.comments))S.comments=[]; if(!Array.isArray(S.stocks))S.stocks=[]; }
 const MODE=()=>['file','direct'].includes(S.src.kind)?'A':(S.src.kind==='none'?'none':'B');
 
@@ -674,7 +674,6 @@ function loadSource(src,keep){
     setSrcBar(false);
   }
   $('#srcInput').value=src.kind==='file'?src.label:src.url;
-  if(!S.name&&src.kind!=='file')S.name=src.label;
   $('#projName').value=S.name||'';
   updateModeUI(); renderAll(); autosave();
 }
@@ -722,7 +721,7 @@ function updateModeUI(){
     ' — วาดมาร์กอัปและกด 💬 จับเฟรม YouTube/Drive ได้แล้ว';
   else if(S.src.kind==='youtube')hint='YouTube: ดึงภาพจาก iframe ข้ามโดเมนโดยตรงไม่ได้ตามข้อกำหนดเบราว์เซอร์ — '+
     'กด 🎥 เพื่อ<b>เปิดจับภาพจากแท็บ</b> (เลือก “แท็บนี้” ครั้งเดียว) แล้วจับเฟรมได้เลย · หรือแคปหน้าจอเองแล้วกด Cmd/Ctrl+V';
-  else if(S.src.kind==='drive')hint='Drive preview: อ่านเวลาอัตโนมัติไม่ได้ — พิมพ์เวลาในช่อง “พิมพ์เวลาเอง” · กด 🎥 เพื่อจับเฟรมจากแท็บ · หรือ '+
+  else if(S.src.kind==='drive')hint='Drive preview: <b>พิมพ์เวลาที่เห็นในตัวเล่นลงช่อง “พิมพ์เวลาเอง” แล้วกดโพสต์</b> — ระบบจับเฟรมให้เอง (Drive อ่านเวลาอัตโนมัติไม่ได้) · หรือ '+
     '<button class="btn sm" id="tryStream" style="margin-left:6px">ลองสตรีมตรง</button>';
   else hint='';
   $('#capHint').innerHTML=hint;
@@ -886,8 +885,8 @@ async function startTabCapture(){
       video:{frameRate:30}, audio:false, preferCurrentTab:true, selfBrowserSurface:'include'
     });
   }catch(err){
-    toast('ยังไม่ได้อนุญาตการแชร์หน้าจอ ('+err.name+') — กด 🎥 อีกครั้งแล้วเลือก “แท็บนี้”','bad');
-    capStream=null;return false;
+    toast('ยังไม่ได้อนุญาตการแชร์หน้าจอ ('+err.name+') — กด 🎥 เมื่อพร้อมแล้วเลือก “แท็บนี้”','bad');
+    capStream=null;capDeclined=true;return false;
   }
   const tr=capStream.getVideoTracks()[0];
   capSurface=(tr.getSettings&&tr.getSettings().displaySurface)||'';
@@ -907,14 +906,15 @@ function stopTabCapture(silent){
   updateModeUI();
   if(!silent)toast('ปิดการจับภาพจากแท็บแล้ว');
 }
-$('#tabCapBtn').onclick=()=>{capStream?stopTabCapture():startTabCapture();};
+$('#tabCapBtn').onclick=()=>{capDeclined=false;capStream?stopTabCapture():startTabCapture();};
 
 /* ครอปเฉพาะกรอบวิดีโอออกจากภาพแท็บ แล้ววาดมาร์กอัปทับ */
-function grabFromTab(withShapes){
+function grabFromTab(withShapes,target){
   if(!capVid||capVid.videoWidth<64||capVid.videoHeight<64)return 'ERR';   // สตรีมยังไม่พร้อม
   const tr0=capStream&&capStream.getVideoTracks()[0];
   if(!tr0||tr0.readyState!=='live'){stopTabCapture(true);return 'ERR';}    // ผู้ใช้กดหยุดแชร์ไปแล้ว → ไม่เอาเฟรมค้าง
-  const r=$('#ifr').getBoundingClientRect();
+  const el=target||(MODE()==='A'?V:$('#ifr'));   // โหมด A ที่ติด CORS ก็ครอปจากกรอบ <video> ได้
+  const r=el.getBoundingClientRect();
   const sx=capVid.videoWidth/window.innerWidth, sy=capVid.videoHeight/window.innerHeight;
   let cx=r.left*sx, cy=r.top*sy, cw=r.width*sx, ch=r.height*sy;
   const tabLike=(capSurface==='browser')&&cw>20&&ch>20&&
@@ -929,20 +929,30 @@ function grabFromTab(withShapes){
   try{ return cv.toDataURL('image/jpeg',0.82); }catch(e){ return 'ERR'; }
 }
 
-function captureFrame(quiet){
-  const tabMode=(MODE()==='B'&&capStream);
-  if(MODE()!=='A'&&!tabMode){
-    if(!quiet)toast('โหมดนี้ต้องกด 🎥 เปิดจับภาพจากแท็บก่อน — หรือแคปหน้าจอแล้วกด Cmd/Ctrl+V','bad');
-    return false;
+/* จับเฟรม — เลือกวิธีที่ใช้ได้เอง:
+   โหมด A ปกติ → อ่านจาก <video> ตรง
+   โหมด A ที่ติด CORS / โหมด B (YouTube, Drive) → ใช้จับภาพจากแท็บ (ขออนุญาตให้เองถ้ายังไม่ได้เปิด) */
+async function captureFrame(quiet,allowAsk){
+  let url=null;
+  if(MODE()==='A'&&V.videoWidth)url=grab(1280,true);          // ลองทางตรงก่อน
+  if(url&&url!=='ERR'){ setPending(url,quiet); return true; }
+
+  if(!capStream&&!capDeclined&&allowAsk!==false){                            // ยังไม่ได้เปิดจับภาพ → ขอเลย (ต้องมาจากการคลิก/กดปุ่มของผู้ใช้)
+    if(!quiet)toast('ขออนุญาตจับภาพจากแท็บ — เลือก “แท็บนี้ (This tab)” ในหน้าต่างที่เด้งขึ้น');
+    await startTabCapture();
   }
-  if(!tabMode&&!V.videoWidth){ if(!quiet)toast('วิดีโอยังไม่พร้อม','bad'); return false; }
-  const url=tabMode?grabFromTab(true):grab(1280,true);
-  if(!url||url==='ERR'){
-    if(!quiet)toast(tabMode?'อ่านภาพจากแท็บไม่ได้ — กด 🎥 ปิดแล้วเปิดใหม่ เลือก “แท็บนี้”'
-      :'เบราว์เซอร์บล็อกการอ่านภาพจากวิดีโอนี้ (CORS) — ใช้ไฟล์อัปโหลด หรือลิงก์ที่อนุญาต CORS','bad');
-    return false;
+  if(capStream){
+    url=grabFromTab(true);
+    if(url&&url!=='ERR'){ setPending(url,quiet); return true; }
   }
-  pendingFrame={url:url,t:curTime()};
+  if(!quiet)toast(MODE()==='A'
+    ?'อ่านภาพจากวิดีโอนี้ไม่ได้ (CORS) — กด 🎥 เปิดจับภาพจากแท็บ หรือแคปหน้าจอแล้ว Cmd/Ctrl+V'
+    :'ยังจับภาพไม่ได้ — กด 🎥 แล้วเลือก “แท็บนี้” หรือแคปหน้าจอแล้ว Cmd/Ctrl+V','bad');
+  return false;
+}
+function setPending(url,quiet){
+  const manual=parseTc($('#tsManual').value);
+  pendingFrame={url:url,t:(MODE()==='B'&&manual!=null)?manual:curTime()};
   showThumb(url);
   $('#tsLbl').textContent=tc(pendingFrame.t);
   if(!quiet){toast('จับเฟรม '+tc(pendingFrame.t)+' แล้ว — พิมพ์ข้อคิดเห็นทางขวาแล้วกดโพสต์','ok');$('#cmtIn').focus();}
@@ -983,12 +993,23 @@ function shrink(dataUrl,max,cb){
 }
 
 /* ============================ comments ============================ */
-function addComment(){
+async function addComment(){
   const text=$('#cmtIn').value.trim();
   if(!text){toast('พิมพ์ข้อคิดเห็นก่อน','bad');$('#cmtIn').focus();return;}
   const attach=$('#attachTs').checked;
-  if(attach&&!pendingFrame&&(MODE()==='A'||capStream))captureFrame(true);   // auto จับเฟรมให้ตอนโพสต์
   const manual=parseTc($('#tsManual').value);
+
+  /* โหมด B ที่อ่านเวลาเองไม่ได้ (Drive preview) — กันคอมเมนต์เวลา 0:00:00 ที่ไม่ใช่ของจริง */
+  if(attach&&MODE()==='B'&&manual==null&&curTime()<=0){
+    toast('ใส่เวลาที่เห็นในตัวเล่นก่อน (ช่อง “พิมพ์เวลาเอง”) เช่น 0:19 — Drive preview อ่านเวลาอัตโนมัติไม่ได้','bad');
+    $('#tsManual').focus();return;
+  }
+  if(attach&&!pendingFrame){                      // auto จับเฟรมตอนกดโพสต์ (ขออนุญาตแท็บให้เองถ้าจำเป็น)
+    const btn=$('#postBtn'),lbl=btn.textContent;
+    btn.disabled=true;btn.textContent='⏳ จับเฟรม…';
+    await captureFrame(true);
+    btn.disabled=false;btn.textContent=lbl;
+  }
   const t=pendingFrame?pendingFrame.t:(manual!=null?manual:curTime());
   const author=($('#authorIn').value.trim()||CFG.author||'ไม่ระบุชื่อ');
   CFG.author=author;saveCfg();setMyAv();
@@ -1022,6 +1043,7 @@ function setMyAv(){
   const a=$('#myAv');a.textContent=initial(n);a.style.background=avColor(n);
 }
 $('#authorIn').oninput=setMyAv;
+$('#tsManual').oninput=()=>{const v=parseTc($('#tsManual').value);if(v!=null)$('#tsLbl').textContent=tc(v);};
 
 /* ============================ render ============================ */
 function visible(){
@@ -1047,6 +1069,8 @@ function renderMarks(){
     else if(m.dataset.sid){const s=S.stocks.find(x=>x.id===m.dataset.sid);if(s){selStock=s.id;seekTo(s.in);renderAll();}}
   };
 }
+function searchEmpty(){const q=$('#searchIn').value.trim();
+  return (S.comments.length&&q)?('ไม่พบคำค้น “'+esc(q)+'”<br><button class="btn sm" id="clrSearch" style="margin-top:8px">✕ ล้างคำค้น</button>'):'';}
 function renderList(){
   const list=visible(), all=S.comments.slice().sort((a,b)=>a.t-b.t);
   $('#cCount').textContent=S.comments.length;
@@ -1066,8 +1090,10 @@ function renderList(){
           <span data-a="del">ลบ</span>
         </div>
       </div></div>`;
-  }).join(''):`<div class="cempty">${S.comments.length?'ไม่มีรายการในแท็บนี้':'ยังไม่มีข้อคิดเห็น<br><span style="font-size:12.5px">เลื่อนไปจุดที่ต้องแก้ → มาร์ก → พิมพ์ในช่องล่างขวา → โพสต์</span>'}</div>`;
+  }).join(''):`<div class="cempty">${searchEmpty()?searchEmpty():S.comments.length?'ไม่มีรายการในแท็บนี้ ('+S.comments.length+' คอมเมนต์อยู่ในแท็บอื่น)':'ยังไม่มีข้อคิดเห็น<br><span style="font-size:12.5px">เลื่อนไปจุดที่ต้องแก้ → มาร์ก → พิมพ์ในช่องล่างขวา → โพสต์</span>'}</div>`;
 }
+(function(){const o=$('#clist');o.addEventListener('click',e=>{const c=e.target.closest('#clrSearch');
+  if(c){$('#searchIn').value='';renderAll();}});})();
 $('#clist').onclick=e=>{
   const it=e.target.closest('.ci');if(!it)return;
   const id=it.dataset.id, a=e.target.dataset.a;
@@ -1153,7 +1179,8 @@ function spotNext(){
   const prev=stamped[stamped.length-1];
   if(prev&&prev.out==null&&t>prev.in)prev.out=t;
   next.in=t;
-  {const u=(MODE()==='A'&&V.videoWidth)?grab(480,false):(capStream?grabFromTab(false):null);
+  {let u=(MODE()==='A'&&V.videoWidth)?grab(480,false):null;
+   if((!u||u==='ERR')&&capStream)u=grabFromTab(false);
    if(u&&u!=='ERR'){next.frameId='s_'+next.id;FRAMES[next.frameId]=u;}}
   selStock=next.id;
   commit('จับเวลา IN '+tc(t)+' ให้ประโยค');
@@ -1165,7 +1192,8 @@ $('#addStock').onclick=()=>{
   const prev=stamped[stamped.length-1];
   if(prev&&prev.out==null&&t>prev.in)prev.out=t;
   const s={id:uid(),in:t,out:null,line:'',stock:'',note:'',frameId:null};
-  {const u=(MODE()==='A'&&V.videoWidth)?grab(480,false):(capStream?grabFromTab(false):null);
+  {let u=(MODE()==='A'&&V.videoWidth)?grab(480,false):null;
+   if((!u||u==='ERR')&&capStream)u=grabFromTab(false);
    if(u&&u!=='ERR'){s.frameId='s_'+s.id;FRAMES[s.frameId]=u;}}
   S.stocks.push(s);selStock=s.id;
   commit('วางสต็อกที่ '+tc(t));
@@ -1233,7 +1261,8 @@ $('#sbody').addEventListener('click',e=>{
   else if(a==='del'){S.stocks=S.stocks.filter(x=>x.id!==s.id);commit('ลบช่วงสต็อก');}
   else if(a==='grab'){
     if(MODE()!=='A'&&!capStream)return toast('โหมดนี้ต้องกด 🎥 เปิดจับภาพจากแท็บก่อน','bad');
-    const u=(MODE()==='A')?grab(640,true):grabFromTab(true);
+    let u=(MODE()==='A'&&V.videoWidth)?grab(640,true):null;
+    if((!u||u==='ERR')&&capStream)u=grabFromTab(true);
     if(!u||u==='ERR')return toast('อ่านภาพไม่ได้ (วิดีโอยังไม่พร้อม หรือถูกบล็อกด้วย CORS)','bad');
     s.frameId='s_'+s.id;FRAMES[s.frameId]=u;
     if(s.in==null)s.in=curTime();
