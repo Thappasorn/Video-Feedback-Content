@@ -1,4 +1,6 @@
-# Video Feedback Content
+# FrameCut
+
+> เว็บตรวจงานวิดีโอ (video review) สำหรับทีมคอนเทนต์ — repo: `Video-Feedback-Content`
 
 เว็บตรวจงานวิดีโอสำหรับทีมคอนเทนต์ — คอมเมนต์ผูกกับ timestamp พร้อมจับภาพเฟรมและวาดมาร์กอัป,
 วางแผนสต็อกตามประโยคที่พูด, ส่งออกเป็น Google Sheets
@@ -80,7 +82,7 @@
 2. ลบโค้ดเดิม วาง [`apps-script-export.gs`](apps-script-export.gs) ทั้งไฟล์ → บันทึก
 3. Deploy → New deployment → type **Web app**
 4. Execute as **Me** / Who has access **Anyone** → Deploy → อนุญาตสิทธิ์
-5. คัดลอก Web app URL (ลงท้าย `/exec`) ไปใส่ในหน้า ⚙ ตั้งค่า ของเว็บ
+5. คัดลอก Web app URL (ลงท้าย `/exec`) ไปใส่ในหน้า ⚙ ตั้งค่า ของ FrameCut
 
 ---
 

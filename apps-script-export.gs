@@ -1,5 +1,5 @@
 /**
- * Video Review → Google Sheet — Apps Script Web App
+ * FrameCut → Google Sheet — Apps Script Web App
  *
  * วิธีติดตั้ง (ทำครั้งเดียว)
  *  1. เปิด https://script.google.com/home/projects/create → New project
@@ -7,20 +7,20 @@
  *  3. Deploy → New deployment → Select type: Web app
  *  4. Execute as: Me / Who has access: Anyone → Deploy
  *  5. อนุญาตสิทธิ์ (Advanced → Go to project (unsafe) → Allow)
- *     แล้วคัดลอก Web app URL (ลงท้าย /exec) ไปใส่ในหน้า ตั้งค่า ⚙ ของเว็บ Video Review
+ *     แล้วคัดลอก Web app URL (ลงท้าย /exec) ไปใส่ในหน้า ตั้งค่า ⚙ ของ FrameCut
  *
  * เว้น Spreadsheet ID ว่าง = สร้างไฟล์ใหม่ทุกครั้ง / ใส่ ID = เพิ่มชีตในไฟล์เดิม
- * ภาพเฟรมอัปโหลดขึ้น Drive โฟลเดอร์ "Video Review Frames" และตั้งแชร์ "ทุกคนที่มีลิงก์"
+ * ภาพเฟรมอัปโหลดขึ้น Drive โฟลเดอร์ "FrameCut Frames" และตั้งแชร์ "ทุกคนที่มีลิงก์"
  * เพื่อให้สูตร =IMAGE() แสดงผลในชีตได้
  */
 
-function doGet(){ return ContentService.createTextOutput('Video Review endpoint OK'); }
+function doGet(){ return ContentService.createTextOutput('FrameCut endpoint OK'); }
 
 function doPost(e){
   try{
     var p = JSON.parse(e.postData.contents);
     var ss = p.sheetId ? SpreadsheetApp.openById(p.sheetId)
-                       : SpreadsheetApp.create('Video Review - ' + (p.project||'untitled'));
+                       : SpreadsheetApp.create('FrameCut - ' + (p.project||'untitled'));
     var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM-dd HH:mm');
     var sh = ss.insertSheet((p.project||'log').substring(0,20) + ' ' + stamp);
 
@@ -37,8 +37,8 @@ function doPost(e){
     var folder = null;
     function putImage(sheet,row,col,b64,name){
       if(!folder){
-        var it = DriveApp.getFoldersByName('Video Review Frames');
-        folder = it.hasNext() ? it.next() : DriveApp.createFolder('Video Review Frames');
+        var it = DriveApp.getFoldersByName('FrameCut Frames');
+        folder = it.hasNext() ? it.next() : DriveApp.createFolder('FrameCut Frames');
       }
       var f = folder.createFile(Utilities.newBlob(Utilities.base64Decode(b64),'image/jpeg',name));
       f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);

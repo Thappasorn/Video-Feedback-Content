@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Video Review — ตรวจงานวิดีโอ</title>
+<title>FrameCut — ตรวจงานวิดีโอ</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230061ff'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'%3E%3Crect x='8' y='9.5' width='16' height='13' rx='2'/%3E%3Cpath d='M8 16h16'/%3E%3C/g%3E%3C/svg%3E">
 <style>
 :root{
   --bg:#181818; --panel:#212121; --card:#2c2c2c; --card2:#333335; --line:#3a3a3a;
@@ -46,6 +47,11 @@ textarea{resize:vertical;line-height:1.5}
 .ic:hover{background:#3a3a3d;color:#fff}
 .ic:disabled{opacity:.3}
 .ic.on{background:#3a3a3d;color:#fff}
+.brand{display:flex;align-items:center;gap:8px;font-size:15.5px;font-weight:700;letter-spacing:-.2px;
+  padding-right:2px;user-select:none}
+.brand svg{width:24px;height:24px;flex:none;border-radius:7px}
+.vdiv{width:1px;height:22px;background:var(--line);margin:0 4px}
+@media(max-width:700px){.brand span{display:none}}
 .title{background:transparent;border:1px solid transparent;font-size:15px;font-weight:600;
   width:auto;min-width:120px;max-width:340px;padding:5px 8px;border-radius:6px}
 .title:hover{border-color:var(--line)}
@@ -229,6 +235,13 @@ ul.tips{margin:6px 0 0;padding-left:20px;line-height:1.85;color:var(--tx2)}
 
 <!-- ================= topbar ================= -->
 <div class="topbar">
+  <div class="brand" title="FrameCut — เว็บตรวจงานวิดีโอ">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0061ff"/>
+      <g fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round">
+        <rect x="8" y="9.5" width="16" height="13" rx="2"/><path d="M8 16h16"/></g></svg>
+    <span>FrameCut</span>
+  </div>
+  <span class="vdiv"></span>
   <button class="ic" id="srcToggle" title="เปลี่ยน / โหลดวิดีโอ">‹</button>
   <input class="title" id="projName" placeholder="ตั้งชื่องาน…" value="">
   <span id="modeBadge" class="mbadge b hidden"></span>
@@ -1257,7 +1270,7 @@ function tsvText(){
   const c=v=>String(v==null?'':v).replace(/\t/g,' ').replace(/\r?\n/g,' ');
   return [HEAD].concat(rows().map(toArr)).map(r=>r.map(c).join('\t')).join('\n');
 }
-function fname(ext){return (S.name||'video-feedback')+'_'+new Date().toISOString().slice(0,10)+'.'+ext;}
+function fname(ext){return (S.name||'framecut')+'_'+new Date().toISOString().slice(0,10)+'.'+ext;}
 async function copyText(t){
   try{await navigator.clipboard.writeText(t);}
   catch(e){const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();
@@ -1319,7 +1332,7 @@ $('#expZip').onclick=()=>{
       files.push({name:r.frameFile,data:b64ToU8(FRAMES[r.frameId].split(',')[1])});nImg++;}});
   }
   files.push({name:'README.txt',data:enc.encode(
-    'Video Review export\nโปรเจกต์: '+(S.name||'-')+'\nวิดีโอ: '+(S.src.url||S.src.label||'-')+
+    'FrameCut export\nโปรเจกต์: '+(S.name||'-')+'\nวิดีโอ: '+(S.src.url||S.src.label||'-')+
     '\nคอมเมนต์: '+S.comments.length+' รายการ · แผนสต็อก: '+S.stocks.length+' ช่วง'+
     '\nส่งออก: '+new Date().toLocaleString('th-TH')+
     '\n\ncomments.csv    = ตารางคอมเมนต์ (เปิดใน Excel / นำเข้า Google Sheets ได้)'+
@@ -1362,15 +1375,15 @@ $('#expStockSheet').onclick=async()=>{
 };
 
 /* ---- Apps Script ---- */
-const GS_CODE=String.raw`/** Video Review → Google Sheet  (Apps Script Web App)
+const GS_CODE=String.raw`/** FrameCut → Google Sheet  (Apps Script Web App)
  *  ชีต 1 = คอมเมนต์ + ภาพเฟรม   ชีต 2 = แผนวางสต็อก (IN/OUT/ประโยค/สต็อก) */
-function doGet(){ return ContentService.createTextOutput('Video Review endpoint OK'); }
+function doGet(){ return ContentService.createTextOutput('FrameCut endpoint OK'); }
 
 function doPost(e){
   try{
     var p = JSON.parse(e.postData.contents);
     var ss = p.sheetId ? SpreadsheetApp.openById(p.sheetId)
-                       : SpreadsheetApp.create('Video Review - ' + (p.project||'untitled'));
+                       : SpreadsheetApp.create('FrameCut - ' + (p.project||'untitled'));
     var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM-dd HH:mm');
     var sh = ss.insertSheet((p.project||'log').substring(0,20) + ' ' + stamp);
 
@@ -1387,8 +1400,8 @@ function doPost(e){
     var folder = null;
     function putImage(sheet,row,col,b64,name){
       if(!folder){
-        var it = DriveApp.getFoldersByName('Video Review Frames');
-        folder = it.hasNext() ? it.next() : DriveApp.createFolder('Video Review Frames');
+        var it = DriveApp.getFoldersByName('FrameCut Frames');
+        folder = it.hasNext() ? it.next() : DriveApp.createFolder('FrameCut Frames');
       }
       var f = folder.createFile(Utilities.newBlob(Utilities.base64Decode(b64),'image/jpeg',name));
       f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
@@ -1473,10 +1486,10 @@ $('#shareMenu').onclick=e=>{
 
 /* ============================ backup ============================ */
 function projectBlob(){
-  return new Blob([JSON.stringify({app:'video-review',v:2,saved:new Date().toISOString(),
+  return new Blob([JSON.stringify({app:'framecut',v:2,saved:new Date().toISOString(),
     CFG:{author:CFG.author},S:S,FRAMES:FRAMES})],{type:'application/json'});
 }
-$('#bkSave').onclick=()=>{dl(projectBlob(),(S.name||'video-review')+'_backup_'+
+$('#bkSave').onclick=()=>{dl(projectBlob(),(S.name||'framecut')+'_backup_'+
   new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.json');toast('ดาวน์โหลดไฟล์ backup แล้ว','ok');};
 $('#bkLoad').onclick=()=>$('#bkFile').click();
 $('#bkFile').onchange=e=>{
