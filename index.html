@@ -235,7 +235,7 @@ ul.tips{margin:6px 0 0;padding-left:20px;line-height:1.85;color:var(--tx2)}
 
 <!-- ================= topbar ================= -->
 <div class="topbar">
-  <div class="brand" title="FrameCut — เว็บตรวจงานวิดีโอ">
+  <div class="brand" id="brand" title="FrameCut">
     <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0061ff"/>
       <g fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round">
         <rect x="8" y="9.5" width="16" height="13" rx="2"/><path d="M8 16h16"/></g></svg>
@@ -465,6 +465,7 @@ ul.tips{margin:6px 0 0;padding-left:20px;line-height:1.85;color:var(--tx2)}
       <div class="muted" style="font-size:12px;margin-top:6px">ยังไม่มี? กด “ดูวิธีติดตั้ง + โค้ด” ด้านล่าง ทำตาม 5 ขั้นตอน (ครั้งเดียว)</div>
     </div>
     <div class="fld"><label>Spreadsheet ID ปลายทาง (เว้นว่าง = สร้างไฟล์ใหม่ทุกครั้ง)</label><input type="text" id="setSheetId" placeholder="1AbC…"></div>
+    <div class="muted" style="font-size:12px;margin:-4px 0 12px">เวอร์ชันไฟล์นี้: <b id="verLbl"></b></div>
     <button class="btn" id="showGs">ดูวิธีติดตั้ง + โค้ด Apps Script</button>
     <div id="gsBox" class="hidden" style="margin-top:11px">
       <ul class="tips" style="font-size:12.5px">
@@ -504,7 +505,14 @@ ul.tips{margin:6px 0 0;padding-left:20px;line-height:1.85;color:var(--tx2)}
       <li><b style="color:#5fd68f">โหมด A — ไฟล์ตรง</b> (อัปโหลด / ลิงก์ .mp4 ตรง / Drive ที่แชร์ “ทุกคนที่มีลิงก์”):
         จับเฟรมจริงเป็นรูปได้ วาดกรอบ–วงกลม–ลูกศร–สติกเกอร์ทับได้ ภาพจะฝังในคอมเมนต์</li>
       <li><b style="color:#f5bf5e">โหมด B — YouTube / Drive preview</b>: เบราว์เซอร์ห้ามดึงภาพจาก iframe ข้ามโดเมนโดยตรง
-        → เก็บ timestamp + ลิงก์กระโดดไปวินาทีนั้น</li>
+        → เก็บ timestamp + ลิงก์กระโดดไปวินาทีนั้น (จับเฟรมได้ผ่านปุ่ม 🎥 ด้านล่าง)</li>
+    </ul>
+    <b style="color:#5b9dff">Google Drive ทำงานอัตโนมัติแค่ไหน</b>
+    <ul class="tips">
+      <li>วางลิงก์ Drive แล้วระบบจะ<b>ลองเปิดสตรีมตรงให้เองเบื้องหลัง</b> — ถ้าไฟล์แชร์ “ทุกคนที่มีลิงก์”
+        (หรือเป็นไฟล์ในบัญชีที่ล็อกอินอยู่) จะสลับเป็นโหมดไฟล์ให้อัตโนมัติ: อ่านเวลา เดินทีละเฟรม ลากไทม์ไลน์ ครบเหมือนอัปโหลดไฟล์</li>
+      <li>ถ้าสตรีมตรงไม่ได้ จะใช้ <b>โหมดเดินเวลา</b>: กด ▶ ของ FrameCut พร้อมกับ ▶ ของ Drive
+        แล้วเวลาจะเดินตรงกันเอง ไม่ต้องพิมพ์เวลาทุกครั้ง — ถ้าเลื่อนหรือหยุดวิดีโอ พิมพ์เวลาที่เห็นลงช่องเวลาเพื่อซิงค์ใหม่</li>
     </ul>
     <b style="color:#5b9dff">จับเฟรม YouTube ให้ได้ — 3 ทาง (เรียงจากดีที่สุด)</b>
     <ul class="tips">
@@ -549,6 +557,7 @@ ul.tips{margin:6px 0 0;padding-left:20px;line-height:1.85;color:var(--tx2)}
 <script>
 "use strict";
 /* ============================ helpers ============================ */
+const APP_VER='1.3.0 · 2026-08-11 · drive-auto';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const enc=new TextEncoder();
 const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
@@ -586,7 +595,18 @@ let S={ name:'', src:{kind:'none',url:'',id:'',label:''}, fps:25, duration:0, co
 let FRAMES={};
 let CFG={ author:'', appsUrl:'', sheetId:'' };
 let HIST=[], HI=-1, filter='all', sel=null, selStock=null, pendingFrame=null, YT=null;
-let capStream=null, capVid=null, capSurface='', capDeclined=false;   // จับภาพจากแท็บ (Screen Capture API)
+let capStream=null, capVid=null, capSurface='', capDeclined=false;
+/* นาฬิกาเดินเวลา — ใช้เมื่อเปิด Drive/YouTube แบบ iframe ที่อ่านเวลาไม่ได้ */
+let vclk={base:0,t0:0,run:false};
+function vclkNow(){return vclk.run?vclk.base+(performance.now()-vclk.t0)/1000:vclk.base;}
+function vclkSet(t){vclk.base=Math.max(0,t||0);if(vclk.run)vclk.t0=performance.now();updateTC();}
+function vclkToggle(){
+  if(vclk.run){vclk.base=vclkNow();vclk.run=false;}
+  else {vclk.t0=performance.now();vclk.run=true;}
+  $('#playBtn').textContent=vclk.run?'❚❚':'▶';
+  toast(vclk.run?'เดินเวลาแล้ว — กด ▶ ในตัวเล่น Drive พร้อมกัน เวลาจะตรงกัน (ถ้าเลื่อน/หยุด ให้กดปุ่มนี้แล้วซิงค์ใหม่)'
+                :'หยุดเวลาที่ '+tc(vclkNow()));
+}   // จับภาพจากแท็บ (Screen Capture API)
 function normalize(){ if(!Array.isArray(S.comments))S.comments=[]; if(!Array.isArray(S.stocks))S.stocks=[]; }
 const MODE=()=>['file','direct'].includes(S.src.kind)?'A':(S.src.kind==='none'?'none':'B');
 
@@ -672,10 +692,44 @@ function loadSource(src,keep){
     f.classList.remove('hidden');
     f.src='https://drive.google.com/file/d/'+src.id+'/preview';
     setSrcBar(false);
+    driveAuto(src.id);          // ลองสตรีมตรงเบื้องหลัง เพื่อให้อ่านเวลา/เดินเฟรมได้จริง
   }
   $('#srcInput').value=src.kind==='file'?src.label:src.url;
   $('#projName').value=S.name||'';
   updateModeUI(); renderAll(); autosave();
+}
+/* Drive: ลองเปิดไฟล์เป็นสตรีมตรงเพื่อให้อ่านเวลาอัตโนมัติได้ (ต้องแชร์ “ทุกคนที่มีลิงก์” หรือเป็นไฟล์ของบัญชีที่ล็อกอินอยู่) */
+function probeVideo(url,ms){
+  return new Promise(res=>{
+    const v=document.createElement('video');v.preload='metadata';v.muted=true;
+    let done=false;
+    const fin=ok=>{if(done)return;done=true;try{v.removeAttribute('src');v.load();}catch(e){}res(ok);};
+    v.onloadedmetadata=()=>fin(isFinite(v.duration)&&v.duration>0);
+    v.onerror=()=>fin(false);
+    setTimeout(()=>fin(false),ms||7000);
+    v.src=url;
+  });
+}
+async function driveAuto(id){
+  if(driveAuto._busy===id)return; driveAuto._busy=id;
+  const cands=[
+    'https://drive.usercontent.google.com/download?id='+id+'&export=download&confirm=t',
+    'https://drive.google.com/uc?export=download&id='+id
+  ];
+  $('#capHint').innerHTML='⏳ กำลังลองเปิดสตรีมตรงจาก Drive เพื่อให้อ่านเวลา/เดินเฟรมได้อัตโนมัติ…';
+  for(const u of cands){
+    if(S.src.id!==id)return;                       // ผู้ใช้เปลี่ยนวิดีโอไปแล้ว
+    if(await probeVideo(u,7000)){
+      loadSource({kind:'direct',id:id,url:u,label:'Google Drive (สตรีมตรง)'},true);
+      toast('เปิดสตรีมตรงจาก Drive ได้ — อ่านเวลา เดินเฟรม และจับเฟรมได้อัตโนมัติแล้ว','ok');
+      return true;
+    }
+  }
+  if(S.src.id===id){
+    updateModeUI();
+    toast('Drive ไฟล์นี้สตรีมตรงไม่ได้ (สิทธิ์แชร์ไม่เปิด) — ใช้โหมดเดินเวลาแทน: กด ▶ ของ FrameCut พร้อมกับ ▶ ของ Drive');
+  }
+  return false;
 }
 function ensureYT(cb){
   if(window.YT&&window.YT.Player)return cb();
@@ -712,7 +766,8 @@ function updateModeUI(){
   tcb.classList.toggle('on',!!capStream);
   tcb.title=capStream?'ปิดการจับภาพจากแท็บ':'เปิดจับภาพจากแท็บ — ใช้จับเฟรม YouTube / Drive ได้';
   const native=['file','direct'].includes(S.src.kind);
-  $('#playBtn').disabled=!native&&S.src.kind!=='youtube';
+  $('#playBtn').disabled=(m==='none');           // Drive preview: ปุ่มนี้เดิน/หยุดนาฬิกาเวลา
+  $('#playBtn').title=(m==='B'&&S.src.kind==='drive')?'เดิน/หยุดนาฬิกาเวลา — กดพร้อม ▶ ของ Drive':'เล่น/หยุด (Space)';
   $('#prevF').disabled=!native;$('#nextF').disabled=!native;$('#muteBtn').disabled=!native;
 
   let hint='';
@@ -721,7 +776,7 @@ function updateModeUI(){
     ' — วาดมาร์กอัปและกด 💬 จับเฟรม YouTube/Drive ได้แล้ว';
   else if(S.src.kind==='youtube')hint='YouTube: ดึงภาพจาก iframe ข้ามโดเมนโดยตรงไม่ได้ตามข้อกำหนดเบราว์เซอร์ — '+
     'กด 🎥 เพื่อ<b>เปิดจับภาพจากแท็บ</b> (เลือก “แท็บนี้” ครั้งเดียว) แล้วจับเฟรมได้เลย · หรือแคปหน้าจอเองแล้วกด Cmd/Ctrl+V';
-  else if(S.src.kind==='drive')hint='Drive preview: <b>พิมพ์เวลาที่เห็นในตัวเล่นลงช่อง “พิมพ์เวลาเอง” แล้วกดโพสต์</b> — ระบบจับเฟรมให้เอง (Drive อ่านเวลาอัตโนมัติไม่ได้) · หรือ '+
+  else if(S.src.kind==='drive')hint='Drive preview: กด <b>▶ ของ FrameCut พร้อมกับ ▶ ของ Drive</b> แล้วเวลาจะเดินตรงกันเอง (พิมพ์เวลาในช่องเพื่อซิงค์ใหม่ได้ทุกเมื่อ) · หรือ '+
     '<button class="btn sm" id="tryStream" style="margin-left:6px">ลองสตรีมตรง</button>';
   else hint='';
   $('#capHint').innerHTML=hint;
@@ -755,12 +810,15 @@ $$('.tool[data-tool]').forEach(b=>b.onclick=()=>{
 function curTime(){
   if(MODE()==='A')return V.currentTime||0;
   if(S.src.kind==='youtube'&&YT&&YT.getCurrentTime)try{return YT.getCurrentTime()||0}catch(e){return 0}
-  return parseTc($('#tsManual').value)||0;
+  const m=parseTc($('#tsManual').value);
+  if(vclk.run)return vclkNow();
+  return (m!=null?m:vclkNow());
 }
 function seekTo(t){
   if(MODE()==='A'){V.currentTime=Math.max(0,Math.min(t,V.duration||t));}
   else if(S.src.kind==='youtube'&&YT&&YT.seekTo){try{YT.seekTo(t,true)}catch(e){}}
-  else {$('#tsManual').value=tc(t);toast('Drive preview เลื่อนเวลาอัตโนมัติไม่ได้ — ใส่เวลา '+tc(t)+' ในช่องเวลาแล้ว');}
+  else {vclkSet(t);$('#tsManual').value=tc(t);
+    toast('ตั้งเวลาอ้างอิงเป็น '+tc(t)+' — เลื่อนตัวเล่น Drive ไปจุดเดียวกันด้วย');}
   updateTC();
 }
 function updateTC(){
@@ -775,11 +833,12 @@ V.addEventListener('loadedmetadata',()=>{S.duration=V.duration||0;updateTC();ren
 V.addEventListener('timeupdate',updateTC);
 V.addEventListener('play',()=>$('#playBtn').textContent='❚❚');
 V.addEventListener('pause',()=>$('#playBtn').textContent='▶');
-setInterval(()=>{if(MODE()==='B'&&S.src.kind==='youtube')updateTC();},400);
+setInterval(()=>{if(MODE()==='B'&&(S.src.kind==='youtube'||vclk.run))updateTC();},250);
 
 $('#playBtn').onclick=()=>{
   if(MODE()==='A'){V.paused?V.play():V.pause();}
-  else if(YT){try{YT.getPlayerState()===1?YT.pauseVideo():YT.playVideo();}catch(e){}}
+  else if(S.src.kind==='youtube'&&YT){try{YT.getPlayerState()===1?YT.pauseVideo():YT.playVideo();}catch(e){}}
+  else vclkToggle();          // Drive preview → เดิน/หยุดนาฬิกาเวลาเอง
 };
 $('#prevF').onclick=()=>seekTo(curTime()-1/S.fps);
 $('#nextF').onclick=()=>seekTo(curTime()+1/S.fps);
@@ -951,8 +1010,7 @@ async function captureFrame(quiet,allowAsk){
   return false;
 }
 function setPending(url,quiet){
-  const manual=parseTc($('#tsManual').value);
-  pendingFrame={url:url,t:(MODE()==='B'&&manual!=null)?manual:curTime()};
+  pendingFrame={url:url,t:curTime()};
   showThumb(url);
   $('#tsLbl').textContent=tc(pendingFrame.t);
   if(!quiet){toast('จับเฟรม '+tc(pendingFrame.t)+' แล้ว — พิมพ์ข้อคิดเห็นทางขวาแล้วกดโพสต์','ok');$('#cmtIn').focus();}
@@ -1000,7 +1058,7 @@ async function addComment(){
   const manual=parseTc($('#tsManual').value);
 
   /* โหมด B ที่อ่านเวลาเองไม่ได้ (Drive preview) — กันคอมเมนต์เวลา 0:00:00 ที่ไม่ใช่ของจริง */
-  if(attach&&MODE()==='B'&&manual==null&&curTime()<=0){
+  if(attach&&MODE()==='B'&&manual==null&&!vclk.run&&curTime()<=0){
     toast('ใส่เวลาที่เห็นในตัวเล่นก่อน (ช่อง “พิมพ์เวลาเอง”) เช่น 0:19 — Drive preview อ่านเวลาอัตโนมัติไม่ได้','bad');
     $('#tsManual').focus();return;
   }
@@ -1010,7 +1068,7 @@ async function addComment(){
     await captureFrame(true);
     btn.disabled=false;btn.textContent=lbl;
   }
-  const t=pendingFrame?pendingFrame.t:(manual!=null?manual:curTime());
+  const t=pendingFrame?pendingFrame.t:curTime();
   const author=($('#authorIn').value.trim()||CFG.author||'ไม่ระบุชื่อ');
   CFG.author=author;saveCfg();setMyAv();
   const c={id:uid(),t:attach?t:0,text:text,author:author,tag:$('#tagIn').value,status:'open',
@@ -1043,7 +1101,8 @@ function setMyAv(){
   const a=$('#myAv');a.textContent=initial(n);a.style.background=avColor(n);
 }
 $('#authorIn').oninput=setMyAv;
-$('#tsManual').oninput=()=>{const v=parseTc($('#tsManual').value);if(v!=null)$('#tsLbl').textContent=tc(v);};
+$('#tsManual').oninput=()=>{const v=parseTc($('#tsManual').value);
+  if(v!=null){vclk.base=v;if(vclk.run)vclk.t0=performance.now();$('#tsLbl').textContent=tc(v);}};
 
 /* ============================ render ============================ */
 function visible(){
@@ -1643,6 +1702,9 @@ window.addEventListener('beforeunload',e=>{
 
 /* ============================ boot ============================ */
 loadCfg();
+$('#verLbl').textContent=APP_VER;
+$('#brand').title='FrameCut '+APP_VER;
+console.info('FrameCut '+APP_VER);
 $('#authorIn').value=CFG.author||'';setMyAv();
 snap('เริ่มต้น');
 updateModeUI();renderAll();
