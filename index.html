@@ -557,7 +557,7 @@ ul.tips{margin:6px 0 0;padding-left:20px;line-height:1.85;color:var(--tx2)}
 <script>
 "use strict";
 /* ============================ helpers ============================ */
-const APP_VER='1.3.0 · 2026-08-11 · drive-auto';
+const APP_VER='1.4.0 · 2026-08-11 · auto-time';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const enc=new TextEncoder();
 const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
@@ -569,6 +569,7 @@ function dl(blob,name){const a=document.createElement('a');a.href=URL.createObje
 function pad(n,w){n=Math.floor(Math.abs(n));return String(n).padStart(w||2,'0');}
 
 /* timecode แบบ Replay: m:ss:ff (มีชั่วโมงเมื่อเกิน 1 ชม.) */
+function tcOf(c){return (c.approx?'≈':'')+tc(c.t);}
 function tc(sec,fps){
   fps=fps||S.fps;sec=Math.max(0,sec||0);
   const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=Math.floor(sec%60);
@@ -600,7 +601,34 @@ let capStream=null, capVid=null, capSurface='', capDeclined=false;
 let vclk={base:0,t0:0,run:false};
 function vclkNow(){return vclk.run?vclk.base+(performance.now()-vclk.t0)/1000:vclk.base;}
 function vclkSet(t){vclk.base=Math.max(0,t||0);if(vclk.run)vclk.t0=performance.now();updateTC();}
+/* ตรวจจับว่าวิดีโอใน iframe กำลังเล่นอยู่ไหม จากการเปลี่ยนแปลงของภาพในแท็บ
+   → เดิน/หยุดนาฬิกาเวลาให้เอง ผู้ใช้ไม่ต้องกดอะไร */
+let motion={prev:null,timer:null};
+function motionStart(){
+  if(motion.timer)return;
+  const cv=document.createElement('canvas');cv.width=48;cv.height=27;
+  const g=cv.getContext('2d',{willReadFrequently:true});
+  motion.timer=setInterval(()=>{
+    if(!capStream||!capVid||MODE()!=='B'||S.src.kind==='youtube'){motion.prev=null;return;}
+    const r=$('#ifr').getBoundingClientRect();
+    const sx=capVid.videoWidth/window.innerWidth, sy=capVid.videoHeight/window.innerHeight;
+    if(!(r.width>10&&capVid.videoWidth>10))return;
+    try{ g.drawImage(capVid,r.left*sx,r.top*sy,r.width*sx,r.height*sy,0,0,cv.width,cv.height); }catch(e){return;}
+    let d;try{ d=g.getImageData(0,0,cv.width,cv.height).data; }catch(e){return;}
+    if(motion.prev){
+      let sum=0;
+      for(let i=0;i<d.length;i+=4)
+        sum+=Math.abs(d[i]-motion.prev[i])+Math.abs(d[i+1]-motion.prev[i+1])+Math.abs(d[i+2]-motion.prev[i+2]);
+      const avg=sum/(d.length/4*3), moving=avg>2.0;
+      if(moving&&!vclk.run){vclk.t0=performance.now();vclk.run=true;vclk.auto=true;$('#playBtn').textContent='❚❚';updateModeUI();}
+      else if(!moving&&vclk.run&&vclk.auto){vclk.base=vclkNow();vclk.run=false;$('#playBtn').textContent='▶';updateModeUI();}
+    }
+    motion.prev=d;
+  },600);
+}
+function motionStop(){if(motion.timer)clearInterval(motion.timer);motion.timer=null;motion.prev=null;}
 function vclkToggle(){
+  vclk.auto=false;                                  // ผู้ใช้คุมเองแล้ว
   if(vclk.run){vclk.base=vclkNow();vclk.run=false;}
   else {vclk.t0=performance.now();vclk.run=true;}
   $('#playBtn').textContent=vclk.run?'❚❚':'▶';
@@ -714,16 +742,19 @@ async function driveAuto(id){
   if(driveAuto._busy===id)return; driveAuto._busy=id;
   const cands=[
     'https://drive.usercontent.google.com/download?id='+id+'&export=download&confirm=t',
-    'https://drive.google.com/uc?export=download&id='+id
+    'https://drive.usercontent.google.com/uc?id='+id+'&export=download',
+    'https://drive.google.com/uc?export=download&id='+id,
+    'https://drive.google.com/uc?id='+id+'&export=view',
+    'https://docs.google.com/uc?export=download&id='+id
   ];
   $('#capHint').innerHTML='⏳ กำลังลองเปิดสตรีมตรงจาก Drive เพื่อให้อ่านเวลา/เดินเฟรมได้อัตโนมัติ…';
-  for(const u of cands){
-    if(S.src.id!==id)return;                       // ผู้ใช้เปลี่ยนวิดีโอไปแล้ว
-    if(await probeVideo(u,7000)){
-      loadSource({kind:'direct',id:id,url:u,label:'Google Drive (สตรีมตรง)'},true);
-      toast('เปิดสตรีมตรงจาก Drive ได้ — อ่านเวลา เดินเฟรม และจับเฟรมได้อัตโนมัติแล้ว','ok');
-      return true;
-    }
+  const winner=await Promise.all(cands.map(u=>probeVideo(u,9000).then(ok=>ok?u:null)))
+    .then(rs=>rs.find(Boolean));                    // ยิงพร้อมกัน เอาอันแรกที่เล่นได้
+  if(S.src.id!==id)return;                          // ผู้ใช้เปลี่ยนวิดีโอไปแล้ว
+  if(winner){
+    loadSource({kind:'direct',id:id,url:winner,label:'Google Drive (สตรีมตรง)'},true);
+    toast('เปิดสตรีมตรงจาก Drive ได้ — อ่านเวลา เดินเฟรม จับเฟรม อัตโนมัติครบแล้ว','ok');
+    return true;
   }
   if(S.src.id===id){
     updateModeUI();
@@ -752,7 +783,8 @@ function updateModeUI(){
   b.classList.remove('hidden','a','b');
   if(m==='none')b.classList.add('hidden');
   else if(m==='A'){b.classList.add('a');b.textContent='จับเฟรมได้ · '+S.src.label;}
-  else{b.classList.add('b');b.textContent=S.src.label+' · จับเฟรมอัตโนมัติไม่ได้';}
+  else{b.classList.add(capStream?'a':'b');
+    b.textContent=S.src.label+(capStream?' · จับเฟรม + เวลาอัตโนมัติ (ผ่านแท็บ)':' · กดโพสต์แล้วระบบจะขอจับภาพจากแท็บ');}
 
   const canGrab=canDrawNow();
   const canDraw=canGrab;
@@ -772,11 +804,12 @@ function updateModeUI(){
 
   let hint='';
   if(m==='A')hint='เลือกเครื่องมือวาดเพื่อมาร์กจุดที่ต้องแก้ แล้วกด 💬 (หรือปุ่ม C) เพื่อจับเฟรมเข้าคอมเมนต์';
-  else if(capStream)hint='🎥 จับภาพจากแท็บกำลังทำงาน'+(capSurface&&capSurface!=='browser'?' (แชร์ทั้งจอ — ภาพที่ได้อาจครอบเกินกรอบวิดีโอ ถ้าจะให้พอดีให้เลือก “แท็บนี้”)':'')+
-    ' — วาดมาร์กอัปและกด 💬 จับเฟรม YouTube/Drive ได้แล้ว';
+  else if(capStream)hint='🎥 จับภาพจากแท็บทำงานอยู่ — <b>เวลาเดินตามวิดีโอให้เองแล้ว</b> · '+
+    (capSurface&&capSurface!=='browser'?'แชร์ทั้งจอ ภาพอาจครอบเกินกรอบวิดีโอ — ถ้าจะให้พอดีให้กด 🎥 ปิดแล้วเปิดใหม่ เลือก “แท็บนี้” · ':'')+
+    'เครื่องหมาย ≈ หน้าเวลา = เวลาประมาณจากนาฬิกา (พิมพ์เวลาในช่องเพื่อซิงค์ให้ตรงเป๊ะได้ทุกเมื่อ)';
   else if(S.src.kind==='youtube')hint='YouTube: ดึงภาพจาก iframe ข้ามโดเมนโดยตรงไม่ได้ตามข้อกำหนดเบราว์เซอร์ — '+
     'กด 🎥 เพื่อ<b>เปิดจับภาพจากแท็บ</b> (เลือก “แท็บนี้” ครั้งเดียว) แล้วจับเฟรมได้เลย · หรือแคปหน้าจอเองแล้วกด Cmd/Ctrl+V';
-  else if(S.src.kind==='drive')hint='Drive preview: กด <b>▶ ของ FrameCut พร้อมกับ ▶ ของ Drive</b> แล้วเวลาจะเดินตรงกันเอง (พิมพ์เวลาในช่องเพื่อซิงค์ใหม่ได้ทุกเมื่อ) · หรือ '+
+  else if(S.src.kind==='drive')hint='Drive preview: <b>พิมพ์คอมเมนต์แล้วกดโพสต์ได้เลย</b> — ระบบจะขอจับภาพจากแท็บครั้งเดียว แล้วจับเฟรม + เดินเวลาตามวิดีโอให้เองอัตโนมัติ · หรือ '+
     '<button class="btn sm" id="tryStream" style="margin-left:6px">ลองสตรีมตรง</button>';
   else hint='';
   $('#capHint').innerHTML=hint;
@@ -954,14 +987,16 @@ async function startTabCapture(){
   capVid.muted=true;capVid.playsInline=true;capVid.srcObject=capStream;
   try{await capVid.play();}catch(e){}
   await new Promise(r=>setTimeout(r,350));
+  motionStart();
   updateModeUI();
-  toast(capSurface==='browser'?'เปิดจับภาพจากแท็บแล้ว — กด 💬 จับเฟรมได้เลย'
+  toast(capSurface==='browser'?'เปิดจับภาพจากแท็บแล้ว — เวลาจะเดินตามวิดีโอให้เองแล้ว'
     :'เปิดจับภาพแล้ว (แชร์ '+(capSurface||'หน้าจอ')+') — ถ้าภาพครอบไม่พอดี ให้กด 🎥 ปิดแล้วเปิดใหม่ เลือก “แท็บนี้”','ok');
   return true;
 }
 function stopTabCapture(silent){
   if(capStream)capStream.getTracks().forEach(t=>t.stop());
   capStream=null;capVid=null;capSurface='';
+  motionStop();if(vclk.auto&&vclk.run){vclk.base=vclkNow();vclk.run=false;$('#playBtn').textContent='▶';}
   updateModeUI();
   if(!silent)toast('ปิดการจับภาพจากแท็บแล้ว');
 }
@@ -1057,22 +1092,22 @@ async function addComment(){
   const attach=$('#attachTs').checked;
   const manual=parseTc($('#tsManual').value);
 
-  /* โหมด B ที่อ่านเวลาเองไม่ได้ (Drive preview) — กันคอมเมนต์เวลา 0:00:00 ที่ไม่ใช่ของจริง */
-  if(attach&&MODE()==='B'&&manual==null&&!vclk.run&&curTime()<=0){
-    toast('ใส่เวลาที่เห็นในตัวเล่นก่อน (ช่อง “พิมพ์เวลาเอง”) เช่น 0:19 — Drive preview อ่านเวลาอัตโนมัติไม่ได้','bad');
-    $('#tsManual').focus();return;
-  }
-  if(attach&&!pendingFrame){                      // auto จับเฟรมตอนกดโพสต์ (ขออนุญาตแท็บให้เองถ้าจำเป็น)
+  if(attach&&!pendingFrame){                      // auto จับเฟรม + เปิดนาฬิกาเวลาให้เองตอนกดโพสต์
     const btn=$('#postBtn'),lbl=btn.textContent;
     btn.disabled=true;btn.textContent='⏳ จับเฟรม…';
     await captureFrame(true);
     btn.disabled=false;btn.textContent=lbl;
   }
+  /* ถ้ายังไม่รู้เวลาเลย (Drive preview ที่เพิ่งเปิด) ให้เริ่มนับจาก 0 แล้วบอกผู้ใช้ว่าเป็นเวลาประมาณ */
+  if(attach&&MODE()==='B'&&S.src.kind!=='youtube'&&manual==null&&!vclk.run&&vclkNow()<=0&&capStream){
+    vclk.t0=performance.now();vclk.run=true;vclk.auto=true;$('#playBtn').textContent='❚❚';
+  }
   const t=pendingFrame?pendingFrame.t:curTime();
   const author=($('#authorIn').value.trim()||CFG.author||'ไม่ระบุชื่อ');
   CFG.author=author;saveCfg();setMyAv();
+  const approx=(MODE()==='B'&&S.src.kind!=='youtube'&&manual==null);   // เวลาจากนาฬิกาเดินเอง = ประมาณ
   const c={id:uid(),t:attach?t:0,text:text,author:author,tag:$('#tagIn').value,status:'open',
-           frameId:null,link:attach?deepLink(t):'',created:new Date().toISOString()};
+           approx:attach&&approx,frameId:null,link:attach?deepLink(t):'',created:new Date().toISOString()};
   if(pendingFrame&&attach){c.frameId='f_'+c.id;FRAMES[c.frameId]=pendingFrame.url;}
   S.comments.push(c);
   $('#cmtIn').value='';$('#clearThumb').click();shapes=[];paint();
@@ -1142,7 +1177,7 @@ function renderList(){
       <div class="av" style="background:${avColor(c.author)}">${initial(c.author)}</div>
       <div class="body">
         <div class="nm">${esc(c.author)} <span class="no">#${no} · ${esc(c.tag)}</span></div>
-        <div class="tx"><span class="t">${tc(c.t)}</span>${esc(c.text)}</div>
+        <div class="tx"><span class="t">${tcOf(c)}</span>${esc(c.text)}</div>
         ${th}
         <div class="acts">
           <span data-a="st">${c.status==='open'?'✓ ทำเครื่องหมายว่าแก้ไขแล้ว':'↺ กลับเป็นยังไม่แก้'}</span>
@@ -1168,7 +1203,7 @@ function renderTable(){
     const img=c.frameId&&FRAMES[c.frameId]?`<img src="${FRAMES[c.frameId]}" data-zoom="${c.frameId}" alt="">`
       :'<span class="muted" style="font-size:12px">—</span>';
     return `<tr data-id="${c.id}">
-      <td>${no}</td><td class="tm" data-a="seek">${tc(c.t)}</td><td>${img}</td>
+      <td>${no}</td><td class="tm" data-a="seek">${tcOf(c)}</td><td>${img}</td>
       <td><select data-a="tag" style="padding:3px 5px;font-size:12.5px">${
         ['ภาพ','ตัดต่อ','กราฟิก/ข้อความ','เสียง/ดนตรี','สี','เนื้อหา/ข้อมูล','อื่นๆ']
         .map(t=>`<option${t===c.tag?' selected':''}>${t}</option>`).join('')}</select></td>
@@ -1339,7 +1374,7 @@ $('#sbody').addEventListener('focusout',e=>{
 function rows(){
   const all=S.comments.slice().sort((a,b)=>a.t-b.t);
   return all.map((c,i)=>({
-    no:i+1, tc:tc(c.t), sec:+c.t.toFixed(3), tag:c.tag, text:c.text, author:c.author,
+    no:i+1, tc:tcOf(c), sec:+c.t.toFixed(3), tag:c.tag, text:c.text, author:c.author,
     status:c.status==='open'?'ยังไม่แก้':'แก้แล้ว', link:c.link||'',
     frameFile:c.frameId?('frames/'+pad(i+1,3)+'_'+tc(c.t).replace(/:/g,'-')+'.jpg'):'',
     frameId:c.frameId||'', created:new Date(c.created).toLocaleString('th-TH')
